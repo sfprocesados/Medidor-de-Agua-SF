@@ -127,6 +127,18 @@
     font-size:14px;
     color:#555;
     margin:0 0 10px 2px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .link-actualizar{
+    font-size:12.5px;
+    color:var(--azul);
+    cursor:pointer;
+    font-weight:600;
+    background:none;
+    border:none;
+    padding:0;
   }
 
   /* --- Acordeón de líneas --- */
@@ -157,6 +169,7 @@
   }
   .badge.si{background:var(--verde-fondo);color:var(--verde);}
   .badge.no{background:#eef1f4;color:var(--gris);}
+  .badge.cargando{background:#eef1f4;color:var(--gris);}
   .chev{color:var(--gris);font-size:13px;}
   .linea-cuerpo{
     display:none;
@@ -273,6 +286,22 @@ const LINEAS_POR_DEFECTO = [
 
 const app = document.getElementById("app");
 
+function formatearFechaDMA(fechaISO){
+  // "2026-07-30" -> "30/07/2026"
+  if (!fechaISO) return "";
+  const partes = String(fechaISO).slice(0,10).split("-");
+  if (partes.length !== 3) return fechaISO;
+  return `${partes[2]}/${partes[1]}/${partes[0]}`;
+}
+
+function formatearMesDMA(mesISO){
+  // "2026-07" -> "07/2026"
+  if (!mesISO) return "";
+  const partes = String(mesISO).split("-");
+  if (partes.length !== 2) return mesISO;
+  return `${partes[1]}/${partes[0]}`;
+}
+
 function getISOWeek(date){
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;
@@ -282,7 +311,11 @@ function getISOWeek(date){
 }
 
 /* =========================================================
-   ESTADO GENERAL
+   ESTADO GENERAL Y CACHÉ EN MEMORIA
+   (mientras la pestaña del navegador siga abierta, no se
+   vuelve a pedir al servidor lo que ya se cargó una vez;
+   esto es lo que hace que cambiar de pestaña dentro de la
+   app sea instantáneo la segunda vez)
 ========================================================= */
 let vistaActual = "registro"; // "registro" | "consumo" | "agregar"
 let lineasGlobal = [];        // [{medidorNum, nombre}]
@@ -291,7 +324,8 @@ let sembrandoLineas = false;  // evita sembrar dos veces en paralelo
 // --- estado pantalla "registro" ---
 let semanaActual = getISOWeek(new Date());
 let fechaActual = new Date().toISOString().slice(0,10);
-let lecturasSemana = {};      // { medidorNum: lectura }
+let lecturasSemana = {};              // { medidorNum: lectura } de la semana visible ahora
+let cacheLecturasPorSemana = {};      // { semana: { medidorNum: lectura } } ya consultadas
 let semanaAbierta = false;
 let lineaAbierta = null;      // medidorNum con acordeón abierto
 
@@ -358,15 +392,24 @@ function irAAgregar(){
 
 /* =========================================================
    PANTALLA: Registrar lecturas
+   (pinta la lista de líneas de inmediato con lo que ya está
+   en caché; si la semana elegida no se había consultado antes,
+   la trae en segundo plano y solo actualiza las etiquetas
+   "Ya registrado" cuando llega, sin bloquear toda la pantalla)
 ========================================================= */
 async function renderRegistro(){
-  app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando líneas...</div>`;
-  if (!lineasGlobal.length) await cargarLineas();
+  if (!lineasGlobal.length){
+    app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando líneas...</div>`;
+    await cargarLineas();
+  }
+
+  const yaEnCache = Object.prototype.hasOwnProperty.call(cacheLecturasPorSemana, semanaActual);
+  lecturasSemana = yaEnCache ? cacheLecturasPorSemana[semanaActual] : {};
 
   app.innerHTML = `
     <div class="semana-box">
       <div class="semana-resumen" onclick="toggleSemana()">
-        <div class="txt">Semana <b>${semanaActual}</b> — ${fechaActual}</div>
+        <div class="txt">Semana <b>${semanaActual}</b> — ${formatearFechaDMA(fechaActual)}</div>
         <div class="chev">${semanaAbierta ? "▲ cambiar" : "▼ cambiar"}</div>
       </div>
       <div class="semana-detalle ${semanaAbierta ? "abierto" : ""}">
@@ -384,12 +427,20 @@ async function renderRegistro(){
       </div>
     </div>
 
-    <p class="subtitulo">Líneas / medidores:</p>
+    <p class="subtitulo">
+      <span>Líneas / medidores:</span>
+      <button class="link-actualizar" onclick="refrescarSemanaActual()">↻ actualizar</button>
+    </p>
     <div id="listaLineas"></div>
   `;
 
-  await cargarLecturasSemana();
-  renderListaLineas();
+  renderListaLineas(!yaEnCache); // pinta de inmediato; si no había caché, badges en "cargando"
+
+  if (!yaEnCache){
+    await cargarLecturasSemana();
+    cacheLecturasPorSemana[semanaActual] = lecturasSemana;
+    renderListaLineas(false);
+  }
 }
 
 function toggleSemana(){
@@ -411,6 +462,11 @@ async function aplicarSemana(){
   await renderRegistro();
 }
 
+async function refrescarSemanaActual(){
+  delete cacheLecturasPorSemana[semanaActual];
+  await renderRegistro();
+}
+
 async function cargarLecturasSemana(){
   try{
     const resp = await fetch(`${BASE_URL}?action=lecturas&semana=${semanaActual}`);
@@ -421,7 +477,7 @@ async function cargarLecturasSemana(){
   }
 }
 
-function renderListaLineas(){
+function renderListaLineas(cargandoEstado){
   const cont = document.getElementById("listaLineas");
   cont.innerHTML = "";
 
@@ -436,13 +492,17 @@ function renderListaLineas(){
     const valorActual = yaRegistrado ? lecturasSemana[medidorNum] : "";
     const abierto = lineaAbierta === medidorNum;
 
+    let badgeClase = "no", badgeTexto = "Sin registrar";
+    if (cargandoEstado){ badgeClase = "cargando"; badgeTexto = "..."; }
+    else if (yaRegistrado){ badgeClase = "si"; badgeTexto = "Ya registrado"; }
+
     const box = document.createElement("div");
     box.className = "linea-box";
     box.innerHTML = `
       <div class="linea-header" onclick="toggleLinea(${medidorNum})">
         <span class="nombre"><span class="num">MEDIDOR ${medidorNum}</span> — ${l.nombre}</span>
         <span class="der">
-          <span class="badge ${yaRegistrado ? "si" : "no"}">${yaRegistrado ? "Ya registrado" : "Sin registrar"}</span>
+          <span class="badge ${badgeClase}">${badgeTexto}</span>
           <span class="chev">${abierto ? "▲" : "▼"}</span>
         </span>
       </div>
@@ -464,7 +524,7 @@ function renderListaLineas(){
 
 function toggleLinea(medidorNum){
   lineaAbierta = (lineaAbierta === medidorNum) ? null : medidorNum;
-  renderListaLineas();
+  renderListaLineas(false);
 }
 
 async function guardarLectura(medidorNum, box){
@@ -491,8 +551,10 @@ async function guardarLectura(medidorNum, box){
     if (!data.ok) throw new Error(data.error || "Error desconocido");
 
     lecturasSemana[medidorNum] = valor;
+    cacheLecturasPorSemana[semanaActual] = lecturasSemana;
+    consumoGlobal = null; // los datos de consumo quedaron desactualizados
     lineaAbierta = null;
-    renderListaLineas();
+    renderListaLineas(false);
   }catch(e){
     btn.disabled = false;
     btn.textContent = textoOriginal;
@@ -555,6 +617,7 @@ async function guardarNuevaLinea(){
     if (!data.ok) throw new Error(data.error || "Error desconocido");
 
     lineasGlobal = await obtenerLineasDesdeBackend();
+    consumoGlobal = null; // hay una línea nueva, refrescar consumo cuando se visite
     okDiv.textContent = `✓ Agregado como MEDIDOR ${data.medidorNum} — ${data.nombre}`;
     inputNum.value = "";
     inputNombre.value = "";
@@ -568,11 +631,10 @@ async function guardarNuevaLinea(){
    PANTALLA: Ver consumo (filtros + gráfico)
 ========================================================= */
 async function renderConsumo(){
-  app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando datos...</div>`;
-
   if (!lineasGlobal.length) await cargarLineas();
 
   if (consumoGlobal === null){
+    app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando datos...</div>`;
     try{
       const resp = await fetch(BASE_URL + "?action=consumo");
       const data = await resp.json();
@@ -619,14 +681,17 @@ async function renderConsumo(){
           <select id="selValor" class="campo">
             ${filtroTipo==="semana"
               ? semanas.map(s => `<option value="${s}" ${filtroValor==s?"selected":""}>Semana ${s}</option>`).join("")
-              : meses.map(m => `<option value="${m}" ${filtroValor===m?"selected":""}>${m}</option>`).join("")}
+              : meses.map(m => `<option value="${m}" ${filtroValor===m?"selected":""}>${formatearMesDMA(m)}</option>`).join("")}
           </select>
         </div>
       </div>
     </div>
 
     <div class="grafico-box">
-      <p class="grafico-titulo" id="graficoTitulo"></p>
+      <p class="grafico-titulo">
+        <span id="graficoTitulo"></span>
+        <button class="link-actualizar" style="float:right;" onclick="refrescarConsumo()">↻ actualizar</button>
+      </p>
       <div id="grafico"></div>
     </div>
   `;
@@ -646,6 +711,11 @@ async function renderConsumo(){
   };
 
   dibujarGrafico();
+}
+
+async function refrescarConsumo(){
+  consumoGlobal = null;
+  await renderConsumo();
 }
 
 function obtenerSemanasDisponibles(){
@@ -693,7 +763,7 @@ function calcularDatosGrafico(){
         porMes[mes] = (porMes[mes] || 0) + p.consumo;
       });
       Object.keys(porMes).sort().forEach(mes => {
-        items.push({ label: mes, valor: Number(porMes[mes].toFixed(2)) });
+        items.push({ label: formatearMesDMA(mes), valor: Number(porMes[mes].toFixed(2)) });
       });
     }
   }
@@ -704,11 +774,11 @@ function dibujarGrafico(){
   const items = calcularDatosGrafico();
   const linea = filtroLinea === "" ? null : lineasGlobal.find(l => String(l.medidorNum) === String(filtroLinea));
 
-  const tituloDiv = document.getElementById("graficoTitulo");
+  const tituloSpan = document.getElementById("graficoTitulo");
   if (filtroLinea === ""){
-    tituloDiv.textContent = `Consumo por línea — ${filtroTipo === "semana" ? "Semana " + filtroValor : filtroValor} (eje Y: m³)`;
+    tituloSpan.textContent = `Consumo por línea — ${filtroTipo === "semana" ? "Semana " + filtroValor : formatearMesDMA(filtroValor)} (eje Y: m³)`;
   }else{
-    tituloDiv.textContent = `Consumo de MEDIDOR ${linea ? linea.medidorNum : ""} — ${linea ? linea.nombre : ""} (eje Y: m³)`;
+    tituloSpan.textContent = `Consumo de MEDIDOR ${linea ? linea.medidorNum : ""} — ${linea ? linea.nombre : ""} (eje Y: m³)`;
   }
 
   renderBarChart(document.getElementById("grafico"), items);
@@ -756,3 +826,4 @@ irARegistro();
 </script>
 </body>
 </html>
+
