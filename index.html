@@ -44,23 +44,22 @@
     background:rgba(255,255,255,.12);
     border:none;
     color:#dce8f5;
-    font-size:12.5px;
+    font-size:11px;
     font-weight:600;
     cursor:pointer;
-    padding:10px 6px;
+    padding:9px 4px;
     border-radius:8px 8px 0 0;
   }
   .tab.activo{
     background:var(--fondo);
     color:var(--azul-oscuro);
   }
-  /* Pestaña principal (Registrar) resaltada para diferenciarla del resto */
+  /* Pestaña principal (Equipos Semanal) resaltada para diferenciarla del resto */
   .tab.tab-principal{
     background:var(--naranja);
     color:#fff;
-    font-size:13.5px;
+    font-size:12px;
     font-weight:800;
-    flex:1.15;
   }
   .tab.tab-principal.activo{
     background:#fff;
@@ -73,7 +72,7 @@
     padding:16px;
     padding-bottom:40px;
   }
-  /* --- Selector de semana (desglosable) --- */
+  /* --- Selector de semana/fecha (desglosable) --- */
   .semana-box{
     background:#fff;
     border:1px solid var(--borde);
@@ -128,6 +127,14 @@
     display:flex;
     justify-content:space-between;
     align-items:center;
+  }
+  .subtitulo-seccion{
+    font-size:13px;
+    font-weight:700;
+    color:var(--azul-oscuro);
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    margin:0 0 10px 2px;
   }
   .link-actualizar{
     font-size:12.5px;
@@ -240,8 +247,9 @@
 <header>
   <h1 id="tituloHeader">Medidores de Agua</h1>
   <div class="tabs">
-    <button class="tab tab-principal" id="tabRegistro" onclick="irARegistro()">Registrar</button>
-    <button class="tab" id="tabConsumo" onclick="irAConsumo()">Ver consumo</button>
+    <button class="tab tab-principal" id="tabRegistro" onclick="irARegistro()">Equipos (Semanal)</button>
+    <button class="tab" id="tabDiario" onclick="irADiario()">Planta (Diario)</button>
+    <button class="tab" id="tabConsumo" onclick="irAAnalisis()">Análisis</button>
     <button class="tab" id="tabAgregar" onclick="irAAgregar()">Agregar línea</button>
   </div>
 </header>
@@ -253,10 +261,9 @@
    implementar como "Aplicación web" (ver Code.gs).
 ========================================================= */
 const BASE_URL = "https://script.google.com/macros/s/AKfycbwWNxjFm2FvnJk6YZAv19gI6N-_JOjAQRDa3vwzVjOYbpz_JZdbfROK3Iu-fleLXnw65A/exec";
-// Líneas originales del Excel. Si la app detecta que el backend no tiene
-// NINGUNA línea guardada todavía, las crea automáticamente con estos
-// mismos números la primera vez que se abre (no requiere ningún paso
-// manual). Igual puedes seguir agregando líneas nuevas desde "Agregar línea".
+// Líneas originales del Excel (Equipos, Semanal). Si el backend no tiene
+// NINGUNA línea de este tipo todavía, las crea automáticamente con estos
+// mismos números la primera vez que se abre.
 const LINEAS_POR_DEFECTO = [
   { medidorNum: 1,  nombre: "SOLO DUCHA" },
   { medidorNum: 2,  nombre: "PAILAS COCCION + DUCHA" },
@@ -274,6 +281,12 @@ const LINEAS_POR_DEFECTO = [
   { medidorNum: 14, nombre: "IMPIANTI 2" },
   { medidorNum: 15, nombre: "IMPIANTI 3" },
   { medidorNum: 16, nombre: "IMPIANTI 4" }
+];
+// Mediciones de Planta (Diario). Números propios (101, 102, ...) para no
+// chocar con los medidores 1-16 de Equipos.
+const LINEAS_DIARIO_POR_DEFECTO = [
+  { medidorNum: 101, nombre: "Planta de Producción" },
+  { medidorNum: 102, nombre: "Oficinas" }
 ];
 const app = document.getElementById("app");
 function formatearFechaDMA(fechaISO){
@@ -299,35 +312,42 @@ function getISOWeek(date){
 }
 /* =========================================================
    ESTADO GENERAL Y CACHÉ EN MEMORIA
-   (mientras la pestaña del navegador siga abierta, no se
-   vuelve a pedir al servidor lo que ya se cargó una vez;
-   esto es lo que hace que cambiar de pestaña dentro de la
-   app sea instantáneo la segunda vez)
 ========================================================= */
-let vistaActual = "registro"; // "registro" | "consumo" | "agregar"
+let vistaActual = "registro"; // "registro" | "diario" | "consumo" | "agregar"
+// --- Equipos (Semanal) ---
 let lineasGlobal = [];        // [{medidorNum, nombre}]
-let sembrandoLineas = false;  // evita sembrar dos veces en paralelo
-// --- estado pantalla "registro" ---
+let sembrandoLineas = false;
 let semanaActual = getISOWeek(new Date());
 let fechaActual = new Date().toISOString().slice(0,10);
-let lecturasSemana = {};              // { medidorNum: lectura } de la semana visible ahora
-let cacheLecturasPorSemana = {};      // { semana: { medidorNum: lectura } } ya consultadas
+let lecturasSemana = {};
+let cacheLecturasPorSemana = {};
 let semanaAbierta = false;
-let lineaAbierta = null;      // medidorNum con acordeón abierto
-// --- estado pantalla "consumo" ---
+let lineaAbierta = null;
 let consumoGlobal = null;     // [{medidorNum, nombre, historial:[{semana,fecha,lectura,consumo}]}]
-let filtroLinea = "";         // "" = todas, o medidorNum
+let filtroLinea = "";
 let filtroTipo = "semana";    // "semana" | "mes"
-let filtroValor = null;       // número de semana o "yyyy-mm"
+let filtroValor = null;
 let ordenGrafico = "desc";    // "desc" (mayor a menor) | "asc" (menor a mayor)
+// --- Planta (Diario) ---
+let lineasDiarioGlobal = [];        // [{medidorNum, nombre}]
+let sembrandoLineasDiario = false;
+let fechaDiarioActual = new Date().toISOString().slice(0,10);
+let lecturasDiario = {};
+let cacheLecturasPorFecha = {};
+let fechaDiarioAbierta = false;
+let lineaDiarioAbierta = null;
+let consumoDiarioGlobal = null;     // [{medidorNum, nombre, historial:[{fecha,lectura,consumo}]}]
+let filtroDiarioMedicion = "";      // "" = todas, o medidorNum
+let filtroDiarioMes = null;         // "yyyy-mm"
 function actualizarTabs(){
   document.getElementById("tabRegistro").classList.toggle("activo", vistaActual === "registro");
+  document.getElementById("tabDiario").classList.toggle("activo", vistaActual === "diario");
   document.getElementById("tabConsumo").classList.toggle("activo", vistaActual === "consumo");
   document.getElementById("tabAgregar").classList.toggle("activo", vistaActual === "agregar");
 }
-async function obtenerLineasDesdeBackend(){
+async function obtenerLineasDesdeBackend(tipo){
   try{
-    const resp = await fetch(`${BASE_URL}?action=lineas`);
+    const resp = await fetch(`${BASE_URL}?action=lineas&tipo=${tipo}`);
     const data = await resp.json();
     return (data.ok && data.lineas) ? data.lineas : [];
   }catch(e){
@@ -335,21 +355,35 @@ async function obtenerLineasDesdeBackend(){
   }
 }
 async function cargarLineas(){
-  lineasGlobal = await obtenerLineasDesdeBackend();
-  // Si el backend no tiene ninguna línea todavía, se siembran solas las
-  // 16 originales del Excel (con sus mismos números de medidor).
+  lineasGlobal = await obtenerLineasDesdeBackend("semanal");
   if (!lineasGlobal.length && !sembrandoLineas){
     sembrandoLineas = true;
     for (const l of LINEAS_POR_DEFECTO){
       try{
         await fetch(BASE_URL, {
           method: "POST",
-          body: JSON.stringify({ accion:"agregarLinea", medidorNum: l.medidorNum, nombre: l.nombre })
+          body: JSON.stringify({ accion:"agregarLinea", tipo:"semanal", medidorNum: l.medidorNum, nombre: l.nombre })
         });
       }catch(e){ /* si una falla, seguimos con las demás */ }
     }
-    lineasGlobal = await obtenerLineasDesdeBackend();
+    lineasGlobal = await obtenerLineasDesdeBackend("semanal");
     sembrandoLineas = false;
+  }
+}
+async function cargarLineasDiario(){
+  lineasDiarioGlobal = await obtenerLineasDesdeBackend("diario");
+  if (!lineasDiarioGlobal.length && !sembrandoLineasDiario){
+    sembrandoLineasDiario = true;
+    for (const l of LINEAS_DIARIO_POR_DEFECTO){
+      try{
+        await fetch(BASE_URL, {
+          method: "POST",
+          body: JSON.stringify({ accion:"agregarLinea", tipo:"diario", medidorNum: l.medidorNum, nombre: l.nombre })
+        });
+      }catch(e){ /* si una falla, seguimos con las demás */ }
+    }
+    lineasDiarioGlobal = await obtenerLineasDesdeBackend("diario");
+    sembrandoLineasDiario = false;
   }
 }
 /* =========================================================
@@ -360,10 +394,15 @@ async function irARegistro(){
   actualizarTabs();
   await renderRegistro();
 }
-async function irAConsumo(){
+async function irADiario(){
+  vistaActual = "diario";
+  actualizarTabs();
+  await renderDiario();
+}
+async function irAAnalisis(){
   vistaActual = "consumo";
   actualizarTabs();
-  await renderConsumo();
+  await renderAnalisis();
 }
 function irAAgregar(){
   vistaActual = "agregar";
@@ -371,11 +410,7 @@ function irAAgregar(){
   renderAgregar();
 }
 /* =========================================================
-   PANTALLA: Registrar lecturas
-   (pinta la lista de líneas de inmediato con lo que ya está
-   en caché; si la semana elegida no se había consultado antes,
-   la trae en segundo plano y solo actualiza las etiquetas
-   "Ya registrado" cuando llega, sin bloquear toda la pantalla)
+   PANTALLA: Equipos (Semanal) — registrar lecturas
 ========================================================= */
 async function renderRegistro(){
   if (!lineasGlobal.length){
@@ -410,7 +445,7 @@ async function renderRegistro(){
     </p>
     <div id="listaLineas"></div>
   `;
-  renderListaLineas(!yaEnCache); // pinta de inmediato; si no había caché, badges en "cargando"
+  renderListaLineas(!yaEnCache);
   if (!yaEnCache){
     await cargarLecturasSemana();
     cacheLecturasPorSemana[semanaActual] = lecturasSemana;
@@ -440,7 +475,7 @@ async function refrescarSemanaActual(){
 }
 async function cargarLecturasSemana(){
   try{
-    const resp = await fetch(`${BASE_URL}?action=lecturas&semana=${semanaActual}`);
+    const resp = await fetch(`${BASE_URL}?action=lecturas&tipo=semanal&semana=${semanaActual}`);
     const data = await resp.json();
     lecturasSemana = (data.ok && data.lecturas) ? data.lecturas : {};
   }catch(e){
@@ -505,7 +540,7 @@ async function guardarLectura(medidorNum, box){
   try{
     const resp = await fetch(BASE_URL, {
       method: "POST",
-      body: JSON.stringify({ accion:"guardarLectura", medidorNum, semana: semanaActual, fecha: fechaActual, lectura: valor })
+      body: JSON.stringify({ accion:"guardarLectura", tipo:"semanal", medidorNum, semana: semanaActual, fecha: fechaActual, lectura: valor })
     });
     const data = await resp.json();
     if (!data.ok) throw new Error(data.error || "Error desconocido");
@@ -521,22 +556,164 @@ async function guardarLectura(medidorNum, box){
   }
 }
 /* =========================================================
-   PANTALLA: Agregar línea / medidor
+   PANTALLA: Planta (Diario) — registrar lecturas por día
+========================================================= */
+async function renderDiario(){
+  if (!lineasDiarioGlobal.length){
+    app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando mediciones...</div>`;
+    await cargarLineasDiario();
+  }
+  const yaEnCache = Object.prototype.hasOwnProperty.call(cacheLecturasPorFecha, fechaDiarioActual);
+  lecturasDiario = yaEnCache ? cacheLecturasPorFecha[fechaDiarioActual] : {};
+  app.innerHTML = `
+    <div class="semana-box">
+      <div class="semana-resumen" onclick="toggleFechaDiario()">
+        <div class="txt">Fecha <b>${formatearFechaDMA(fechaDiarioActual)}</b></div>
+        <div class="chev">${fechaDiarioAbierta ? "▲ cambiar" : "▼ cambiar"}</div>
+      </div>
+      <div class="semana-detalle ${fechaDiarioAbierta ? "abierto" : ""}">
+        <label>Fecha</label>
+        <input id="inputFechaDiario" class="campo" type="date" value="${fechaDiarioActual}">
+        <button class="btn-aplicar" onclick="aplicarFechaDiario()">Aplicar</button>
+      </div>
+    </div>
+    <p class="subtitulo">
+      <span>Mediciones de planta:</span>
+      <button class="link-actualizar" onclick="refrescarFechaDiario()">↻ actualizar</button>
+    </p>
+    <div id="listaDiario"></div>
+  `;
+  renderListaDiario(!yaEnCache);
+  if (!yaEnCache){
+    await cargarLecturasDiario();
+    cacheLecturasPorFecha[fechaDiarioActual] = lecturasDiario;
+    renderListaDiario(false);
+  }
+}
+function toggleFechaDiario(){
+  fechaDiarioAbierta = !fechaDiarioAbierta;
+  renderDiario();
+}
+async function aplicarFechaDiario(){
+  const nFecha = document.getElementById("inputFechaDiario").value;
+  if (!nFecha){
+    alert("Ingresa una fecha válida.");
+    return;
+  }
+  fechaDiarioActual = nFecha;
+  fechaDiarioAbierta = false;
+  lineaDiarioAbierta = null;
+  await renderDiario();
+}
+async function refrescarFechaDiario(){
+  delete cacheLecturasPorFecha[fechaDiarioActual];
+  await renderDiario();
+}
+async function cargarLecturasDiario(){
+  try{
+    const resp = await fetch(`${BASE_URL}?action=lecturas&tipo=diario&fecha=${fechaDiarioActual}`);
+    const data = await resp.json();
+    lecturasDiario = (data.ok && data.lecturas) ? data.lecturas : {};
+  }catch(e){
+    lecturasDiario = {};
+  }
+}
+function renderListaDiario(cargandoEstado){
+  const cont = document.getElementById("listaDiario");
+  cont.innerHTML = "";
+  if (!lineasDiarioGlobal.length){
+    cont.innerHTML = `<div class="vacio">No se pudieron cargar las mediciones. Revisa que BASE_URL apunte a tu Apps Script.</div>`;
+    return;
+  }
+  lineasDiarioGlobal.forEach(l => {
+    const medidorNum = l.medidorNum;
+    const yaRegistrado = Object.prototype.hasOwnProperty.call(lecturasDiario, medidorNum);
+    const valorActual = yaRegistrado ? lecturasDiario[medidorNum] : "";
+    const abierto = lineaDiarioAbierta === medidorNum;
+    let badgeClase = "no", badgeTexto = "Sin registrar";
+    if (cargandoEstado){ badgeClase = "cargando"; badgeTexto = "..."; }
+    else if (yaRegistrado){ badgeClase = "si"; badgeTexto = "Ya registrado"; }
+    const box = document.createElement("div");
+    box.className = "linea-box";
+    box.innerHTML = `
+      <div class="linea-header" onclick="toggleLineaDiario(${medidorNum})">
+        <span class="nombre">${l.nombre}</span>
+        <span class="der">
+          <span class="badge ${badgeClase}">${badgeTexto}</span>
+          <span class="chev">${abierto ? "▲" : "▼"}</span>
+        </span>
+      </div>
+      <div class="linea-cuerpo ${abierto ? "abierto" : ""}">
+        <label>Lectura${yaRegistrado ? " (editar)" : ""}</label>
+        <input class="campo input-lectura" type="number" inputmode="decimal" step="any"
+               placeholder="Ej: 120.5" value="${valorActual}">
+        <div class="mensaje-error"></div>
+        <button class="btn-guardar">${yaRegistrado ? "Actualizar lectura" : "Guardar lectura"}</button>
+      </div>
+    `;
+    const btnGuardar = box.querySelector(".btn-guardar");
+    btnGuardar.onclick = () => guardarLecturaDiario(medidorNum, box);
+    cont.appendChild(box);
+  });
+}
+function toggleLineaDiario(medidorNum){
+  lineaDiarioAbierta = (lineaDiarioAbierta === medidorNum) ? null : medidorNum;
+  renderListaDiario(false);
+}
+async function guardarLecturaDiario(medidorNum, box){
+  const input = box.querySelector(".input-lectura");
+  const errorDiv = box.querySelector(".mensaje-error");
+  const btn = box.querySelector(".btn-guardar");
+  const valor = parseFloat(String(input.value).replace(",", "."));
+  if (isNaN(valor)){
+    errorDiv.textContent = "Ingresa un número válido.";
+    return;
+  }
+  errorDiv.textContent = "";
+  btn.disabled = true;
+  const textoOriginal = btn.textContent;
+  btn.textContent = "Guardando...";
+  try{
+    const resp = await fetch(BASE_URL, {
+      method: "POST",
+      body: JSON.stringify({ accion:"guardarLectura", tipo:"diario", medidorNum, fecha: fechaDiarioActual, lectura: valor })
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || "Error desconocido");
+    lecturasDiario[medidorNum] = valor;
+    cacheLecturasPorFecha[fechaDiarioActual] = lecturasDiario;
+    consumoDiarioGlobal = null;
+    lineaDiarioAbierta = null;
+    renderListaDiario(false);
+  }catch(e){
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+    errorDiv.textContent = "No se pudo guardar: " + e.message;
+  }
+}
+/* =========================================================
+   PANTALLA: Agregar línea / medición
 ========================================================= */
 function renderAgregar(){
   app.innerHTML = `
-    <p class="subtitulo">Agrega una nueva línea o medidor, indicando tú el número de medidor que le corresponde.</p>
+    <p class="subtitulo">Agrega una línea nueva, en Equipos (Semanal) o en Planta (Diario).</p>
     <div class="linea-box">
       <div style="padding:16px;">
-        <div class="fila-campos">
-          <div>
-            <label>Número de medidor</label>
-            <input id="inputNumMedidor" class="campo" type="number" min="1" placeholder="Ej: 17">
-          </div>
-          <div>
-            <label>Nombre de la línea</label>
-            <input id="inputNuevaLinea" class="campo" type="text" placeholder="Ej: TUNEL DE CONGELADO">
-          </div>
+        <label>Tipo de línea</label>
+        <select id="selTipoAgregar" class="campo">
+          <option value="semanal">Equipos (Semanal)</option>
+          <option value="diario">Planta (Diario)</option>
+        </select>
+        <div id="campoNumMedidor" style="margin-top:12px;">
+          <label>Número de medidor</label>
+          <input id="inputNumMedidor" class="campo" type="number" min="1" placeholder="Ej: 17">
+        </div>
+        <div id="notaDiario" style="display:none;margin-top:12px;font-size:12.5px;color:var(--gris);">
+          El número de medición se asigna automáticamente.
+        </div>
+        <div style="margin-top:12px;">
+          <label>Nombre</label>
+          <input id="inputNuevaLinea" class="campo" type="text" placeholder="Ej: TUNEL DE CONGELADO">
         </div>
         <div id="errorAgregar" class="mensaje-error"></div>
         <div id="okAgregar" class="mensaje-ok"></div>
@@ -544,18 +721,28 @@ function renderAgregar(){
       </div>
     </div>
   `;
+  document.getElementById("selTipoAgregar").onchange = (e) => {
+    const esDiario = e.target.value === "diario";
+    document.getElementById("campoNumMedidor").style.display = esDiario ? "none" : "block";
+    document.getElementById("notaDiario").style.display = esDiario ? "block" : "none";
+  };
 }
 async function guardarNuevaLinea(){
+  const tipo = document.getElementById("selTipoAgregar").value;
   const inputNum = document.getElementById("inputNumMedidor");
   const inputNombre = document.getElementById("inputNuevaLinea");
   const errorDiv = document.getElementById("errorAgregar");
   const okDiv = document.getElementById("okAgregar");
-  const medidorNum = parseInt(inputNum.value, 10);
   const nombre = inputNombre.value.trim();
-  if (isNaN(medidorNum) || medidorNum <= 0){
-    errorDiv.textContent = "Ingresa un número de medidor válido.";
-    okDiv.textContent = "";
-    return;
+
+  let medidorNum = null;
+  if (tipo === "semanal"){
+    medidorNum = parseInt(inputNum.value, 10);
+    if (isNaN(medidorNum) || medidorNum <= 0){
+      errorDiv.textContent = "Ingresa un número de medidor válido.";
+      okDiv.textContent = "";
+      return;
+    }
   }
   if (!nombre){
     errorDiv.textContent = "Ingresa un nombre.";
@@ -564,14 +751,18 @@ async function guardarNuevaLinea(){
   }
   errorDiv.textContent = "";
   try{
-    const resp = await fetch(BASE_URL, {
-      method: "POST",
-      body: JSON.stringify({ accion:"agregarLinea", medidorNum, nombre })
-    });
+    const body = { accion:"agregarLinea", tipo, nombre };
+    if (tipo === "semanal") body.medidorNum = medidorNum;
+    const resp = await fetch(BASE_URL, { method: "POST", body: JSON.stringify(body) });
     const data = await resp.json();
     if (!data.ok) throw new Error(data.error || "Error desconocido");
-    lineasGlobal = await obtenerLineasDesdeBackend();
-    consumoGlobal = null; // hay una línea nueva, refrescar consumo cuando se visite
+    if (tipo === "semanal"){
+      lineasGlobal = await obtenerLineasDesdeBackend("semanal");
+      consumoGlobal = null;
+    }else{
+      lineasDiarioGlobal = await obtenerLineasDesdeBackend("diario");
+      consumoDiarioGlobal = null;
+    }
     okDiv.textContent = `✓ Agregado como MEDIDOR ${data.medidorNum} — ${data.nombre}`;
     inputNum.value = "";
     inputNombre.value = "";
@@ -581,14 +772,14 @@ async function guardarNuevaLinea(){
   }
 }
 /* =========================================================
-   PANTALLA: Ver consumo (filtros + gráfico)
+   PANTALLA: Análisis (Equipos Semanal + Planta Diario)
 ========================================================= */
-async function renderConsumo(){
+async function renderAnalisis(){
+  app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando datos...</div>`;
   if (!lineasGlobal.length) await cargarLineas();
   if (consumoGlobal === null){
-    app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando datos...</div>`;
     try{
-      const resp = await fetch(BASE_URL + "?action=consumo");
+      const resp = await fetch(BASE_URL + "?action=consumo&tipo=semanal");
       const data = await resp.json();
       if (!data.ok) throw new Error(data.error || "Error desconocido");
       consumoGlobal = data.data;
@@ -597,16 +788,75 @@ async function renderConsumo(){
       return;
     }
   }
-  if (!consumoGlobal.length || consumoGlobal.every(l => !l.historial.length)){
-    app.innerHTML = `<div class="vacio">Todavía no hay lecturas registradas.</div>`;
-    return;
+  if (!lineasDiarioGlobal.length) await cargarLineasDiario();
+  if (consumoDiarioGlobal === null){
+    try{
+      const resp2 = await fetch(BASE_URL + "?action=consumo&tipo=diario");
+      const data2 = await resp2.json();
+      consumoDiarioGlobal = data2.ok ? data2.data : [];
+    }catch(e){
+      consumoDiarioGlobal = [];
+    }
+  }
+  renderPantallaAnalisis();
+}
+async function refrescarAnalisis(){
+  consumoGlobal = null;
+  consumoDiarioGlobal = null;
+  await renderAnalisis();
+}
+function renderPantallaAnalisis(){
+  app.innerHTML = construirSeccionEquipos() + construirSeccionDiario();
+
+  if (document.getElementById("selLinea")){
+    const semanas = obtenerSemanasDisponibles();
+    const meses = obtenerMesesDisponibles();
+    document.getElementById("selLinea").onchange = (e) => {
+      filtroLinea = e.target.value;
+      dibujarGrafico();
+      dibujarPareto();
+    };
+    document.getElementById("selTipo").onchange = (e) => {
+      filtroTipo = e.target.value;
+      filtroValor = filtroTipo === "semana" ? (semanas[0] || null) : (meses[0] || null);
+      renderPantallaAnalisis();
+    };
+    document.getElementById("selValor").onchange = (e) => {
+      filtroValor = filtroTipo === "semana" ? Number(e.target.value) : e.target.value;
+      dibujarGrafico();
+      dibujarPareto();
+    };
+    dibujarGrafico();
+    dibujarPareto();
+  }
+
+  if (document.getElementById("selMedicionDiario")){
+    document.getElementById("selMedicionDiario").onchange = (e) => {
+      filtroDiarioMedicion = e.target.value;
+      dibujarGraficoDiario();
+    };
+    document.getElementById("selMesDiario").onchange = (e) => {
+      filtroDiarioMes = e.target.value;
+      dibujarGraficoDiario();
+    };
+    dibujarGraficoDiario();
+  }
+}
+/* --- Sección Equipos (Semanal): filtros + barras + Pareto --- */
+function construirSeccionEquipos(){
+  if (!consumoGlobal.length || consumoGlobal.every(l => !l.historial.length)) {
+    return `
+      <p class="subtitulo-seccion">Equipos (Semanal)</p>
+      <div class="vacio" style="margin-bottom:26px;">Todavía no hay lecturas registradas.</div>
+    `;
   }
   const semanas = obtenerSemanasDisponibles();
   const meses = obtenerMesesDisponibles();
   if (filtroValor === null){
     filtroValor = filtroTipo === "semana" ? (semanas[0] || null) : (meses[0] || null);
   }
-  app.innerHTML = `
+  return `
+    <p class="subtitulo-seccion">Equipos (Semanal)</p>
     <div class="filtros-box">
       <div class="filtros-fila">
         <div>
@@ -640,32 +890,18 @@ async function renderConsumo(){
         <span id="graficoTitulo"></span>
         <span style="float:right;">
           <button id="btnOrden" class="link-actualizar" style="margin-right:12px;" onclick="toggleOrden()"></button>
-          <button class="link-actualizar" onclick="refrescarConsumo()">↻ actualizar</button>
+          <button class="link-actualizar" onclick="refrescarAnalisis()">↻ actualizar</button>
         </span>
       </p>
       <div id="grafico"></div>
     </div>
+    <div class="grafico-box" id="paretoBox">
+      <p class="grafico-titulo" id="paretoTitulo"></p>
+      <div id="graficoPareto"></div>
+    </div>
   `;
-  document.getElementById("selLinea").onchange = (e) => {
-    filtroLinea = e.target.value;
-    dibujarGrafico();
-  };
-  document.getElementById("selTipo").onchange = (e) => {
-    filtroTipo = e.target.value;
-    filtroValor = filtroTipo === "semana" ? (semanas[0] || null) : (meses[0] || null);
-    renderConsumo();
-  };
-  document.getElementById("selValor").onchange = (e) => {
-    filtroValor = filtroTipo === "semana" ? Number(e.target.value) : e.target.value;
-    dibujarGrafico();
-  };
-  dibujarGrafico();
 }
-async function refrescarConsumo(){
-  consumoGlobal = null;
-  await renderConsumo();
-}
-function toggleOrden(){
+async function toggleOrden(){
   ordenGrafico = ordenGrafico === "desc" ? "asc" : "desc";
   dibujarGrafico();
 }
@@ -684,7 +920,6 @@ function obtenerMesesDisponibles(){
 function calcularDatosGrafico(){
   const items = [];
   if (filtroLinea === ""){
-    // eje X = líneas, eje Y = consumo del periodo elegido
     consumoGlobal.forEach(l => {
       let valor = 0;
       l.historial.forEach(p => {
@@ -764,6 +999,194 @@ function renderBarChart(container, items){
         ${barrasSvg}
       </svg>
     </div>
+  `;
+}
+/* --- Pareto (solo cuando se comparan "Todas las líneas") --- */
+function dibujarPareto(){
+  const box = document.getElementById("paretoBox");
+  const titulo = document.getElementById("paretoTitulo");
+  const cont = document.getElementById("graficoPareto");
+  if (!box) return;
+  if (filtroLinea !== ""){
+    titulo.textContent = "Pareto de consumo";
+    cont.innerHTML = `<div class="vacio">Selecciona "Todas las líneas" para ver el Pareto.</div>`;
+    return;
+  }
+  const items = calcularDatosGrafico().slice().sort((a, b) => b.valor - a.valor);
+  titulo.textContent = `Pareto 80/20 — ${filtroTipo === "semana" ? "Semana " + filtroValor : formatearMesDMA(filtroValor)}`;
+  renderParetoChart(cont, items);
+}
+function renderParetoChart(container, items){
+  if (!items.length){
+    container.innerHTML = `<div class="vacio">No hay datos para este filtro.</div>`;
+    return;
+  }
+  const total = items.reduce((s, i) => s + i.valor, 0) || 1;
+  let acumulado = 0;
+  const pct = items.map(i => { acumulado += i.valor; return Number((acumulado / total * 100).toFixed(1)); });
+
+  const max = Math.max(...items.map(i => i.valor), 1);
+  const anchoBarra = 46;
+  const espacio = 22;
+  const alturaMax = 200;
+  const anchoSvg = items.length * (anchoBarra + espacio) + espacio;
+  const altoSvg = alturaMax + 110;
+
+  let barrasSvg = "";
+  const puntosLinea = [];
+  items.forEach((item, idx) => {
+    const x = espacio + idx * (anchoBarra + espacio);
+    const alturaBarra = Math.max(2, (item.valor / max) * alturaMax);
+    const y = alturaMax - alturaBarra + 20;
+    const xCentro = x + anchoBarra / 2;
+    const yEtiqueta = alturaMax + 26;
+    barrasSvg += `
+      <rect x="${x}" y="${y}" width="${anchoBarra}" height="${alturaBarra}" rx="4" fill="#0b5cab"></rect>
+      <text x="${xCentro}" y="${y - 6}" text-anchor="middle" font-size="10" fill="#083d73" font-weight="700">${item.valor}</text>
+      <text x="${xCentro}" y="${yEtiqueta}" text-anchor="end" font-size="10" fill="#5c6975" transform="rotate(-45 ${xCentro} ${yEtiqueta})">${item.label}</text>
+    `;
+    const yPct = 20 + alturaMax - (pct[idx] / 100) * alturaMax;
+    puntosLinea.push([xCentro, yPct]);
+  });
+  const yLinea80 = 20 + alturaMax - 0.8 * alturaMax;
+  const lineaSvg = `
+    <polyline points="${puntosLinea.map(p => p.join(",")).join(" ")}" fill="none" stroke="#e08a1e" stroke-width="2"></polyline>
+    ${puntosLinea.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#e08a1e"></circle>`).join("")}
+    <line x1="${espacio-6}" y1="${yLinea80}" x2="${anchoSvg-4}" y2="${yLinea80}" stroke="#c0392b" stroke-width="1.2" stroke-dasharray="5,4"></line>
+    <text x="${anchoSvg-6}" y="${yLinea80-4}" text-anchor="end" font-size="9" fill="#c0392b">80%</text>
+  `;
+  container.innerHTML = `
+    <div style="overflow-x:auto;">
+      <svg width="${anchoSvg}" height="${altoSvg}" viewBox="0 0 ${anchoSvg} ${altoSvg}">
+        <line x1="${espacio-6}" y1="${alturaMax+20}" x2="${anchoSvg-4}" y2="${alturaMax+20}" stroke="#d7dee5" />
+        ${barrasSvg}
+        ${lineaSvg}
+      </svg>
+    </div>
+    <div style="margin-top:8px;font-size:11.5px;color:#5c6975;">
+      <span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;"><span style="width:10px;height:10px;background:#0b5cab;display:inline-block;border-radius:2px;"></span>Consumo (m³)</span>
+      <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:10px;height:10px;background:#e08a1e;display:inline-block;border-radius:2px;"></span>% acumulado</span>
+    </div>
+  `;
+}
+/* --- Sección Planta (Diario): filtros + barras por día --- */
+function construirSeccionDiario(){
+  if (!lineasDiarioGlobal.length){
+    return `
+      <p class="subtitulo-seccion" style="margin-top:28px;">Planta (Diario)</p>
+      <div class="vacio">No hay mediciones de planta configuradas.</div>
+    `;
+  }
+  if (!consumoDiarioGlobal.length || consumoDiarioGlobal.every(l => !l.historial.length)){
+    return `
+      <p class="subtitulo-seccion" style="margin-top:28px;">Planta (Diario)</p>
+      <div class="vacio">Todavía no hay lecturas diarias registradas.</div>
+    `;
+  }
+  const meses = obtenerMesesDisponiblesDiario();
+  if (filtroDiarioMes === null){
+    filtroDiarioMes = meses[0] || null;
+  }
+  return `
+    <p class="subtitulo-seccion" style="margin-top:28px;">Planta (Diario)</p>
+    <div class="filtros-box">
+      <div class="filtros-fila">
+        <div>
+          <label>Medición</label>
+          <select id="selMedicionDiario" class="campo">
+            <option value="">Todas</option>
+            ${lineasDiarioGlobal.map(l => `<option value="${l.medidorNum}" ${String(filtroDiarioMedicion)===String(l.medidorNum)?"selected":""}>${l.nombre}</option>`).join("")}
+          </select>
+        </div>
+        <div>
+          <label>Mes</label>
+          <select id="selMesDiario" class="campo">
+            ${meses.map(m => `<option value="${m}" ${filtroDiarioMes===m?"selected":""}>${formatearMesDMA(m)}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="grafico-box">
+      <p class="grafico-titulo">
+        <span id="graficoDiarioTitulo"></span>
+        <button class="link-actualizar" style="float:right;" onclick="refrescarAnalisis()">↻ actualizar</button>
+      </p>
+      <div id="graficoDiario"></div>
+    </div>
+  `;
+}
+function obtenerMesesDisponiblesDiario(){
+  const set = new Set();
+  consumoDiarioGlobal.forEach(l => l.historial.forEach(p => {
+    if (p.consumo !== null && p.fecha) set.add(String(p.fecha).slice(0,7));
+  }));
+  return Array.from(set).sort().reverse();
+}
+function dibujarGraficoDiario(){
+  const titulo = document.getElementById("graficoDiarioTitulo");
+  const cont = document.getElementById("graficoDiario");
+  if (!titulo || !cont) return;
+  const medicionesAMostrar = filtroDiarioMedicion === ""
+    ? lineasDiarioGlobal
+    : lineasDiarioGlobal.filter(l => String(l.medidorNum) === String(filtroDiarioMedicion));
+  titulo.textContent = `Consumo diario — ${formatearMesDMA(filtroDiarioMes)} (m³)`;
+
+  const fechasSet = new Set();
+  const series = medicionesAMostrar.map(l => {
+    const linea = consumoDiarioGlobal.find(c => c.medidorNum === l.medidorNum);
+    const porFecha = {};
+    (linea ? linea.historial : []).forEach(p => {
+      if (p.consumo === null) return;
+      if (String(p.fecha).slice(0,7) !== filtroDiarioMes) return;
+      porFecha[p.fecha] = p.consumo;
+      fechasSet.add(p.fecha);
+    });
+    return { nombre: l.nombre, porFecha };
+  });
+  const fechas = Array.from(fechasSet).sort();
+  renderBarChartDiario(cont, fechas, series);
+}
+function renderBarChartDiario(container, fechas, series){
+  if (!fechas.length || !series.length){
+    container.innerHTML = `<div class="vacio">No hay datos para este filtro.</div>`;
+    return;
+  }
+  const colores = ["#0b5cab", "#e08a1e", "#1f8a4c", "#8a97a3", "#c0392b"];
+  const grupoAncho = series.length === 1 ? 40 : series.length * 18 + 6;
+  const espacio = 20;
+  const alturaMax = 200;
+  const anchoSvg = fechas.length * (grupoAncho + espacio) + espacio;
+  const altoSvg = alturaMax + 100;
+  const max = Math.max(1, ...fechas.map(f => Math.max(...series.map(s => s.porFecha[f] || 0))));
+  const anchoBarraIndiv = series.length === 1 ? grupoAncho : (grupoAncho - 6) / series.length;
+
+  let barrasSvg = "";
+  fechas.forEach((f, idx) => {
+    const xGrupo = espacio + idx * (grupoAncho + espacio);
+    series.forEach((s, si) => {
+      const valor = s.porFecha[f] || 0;
+      const x = xGrupo + si * (anchoBarraIndiv + (series.length > 1 ? 3 : 0));
+      const alturaBarra = Math.max(1, (valor / max) * alturaMax);
+      const y = alturaMax - alturaBarra + 20;
+      barrasSvg += `<rect x="${x}" y="${y}" width="${anchoBarraIndiv}" height="${alturaBarra}" rx="3" fill="${colores[si % colores.length]}"></rect>`;
+    });
+    const xCentro = xGrupo + grupoAncho / 2;
+    const yEtiqueta = alturaMax + 26;
+    barrasSvg += `<text x="${xCentro}" y="${yEtiqueta}" text-anchor="end" font-size="9" fill="#5c6975" transform="rotate(-45 ${xCentro} ${yEtiqueta})">${formatearFechaDMA(f).slice(0,5)}</text>`;
+  });
+  const leyenda = series.length > 1 ? series.map((s, si) => `
+    <span style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:12px;color:#3d4a56;">
+      <span style="width:10px;height:10px;border-radius:2px;background:${colores[si % colores.length]};display:inline-block;"></span>${s.nombre}
+    </span>
+  `).join("") : "";
+  container.innerHTML = `
+    <div style="overflow-x:auto;">
+      <svg width="${anchoSvg}" height="${altoSvg}" viewBox="0 0 ${anchoSvg} ${altoSvg}">
+        <line x1="${espacio-6}" y1="${alturaMax+20}" x2="${anchoSvg-4}" y2="${alturaMax+20}" stroke="#d7dee5" />
+        ${barrasSvg}
+      </svg>
+    </div>
+    ${leyenda ? `<div style="margin-top:8px;">${leyenda}</div>` : ""}
   `;
 }
 /* =========================================================
