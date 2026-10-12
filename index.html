@@ -241,6 +241,47 @@
     animation:girar .8s linear infinite;
   }
   @keyframes girar{to{transform:rotate(360deg);}}
+  .fila-eliminar{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:10px 14px;
+    background:#fff;
+    border:1px solid var(--borde);
+    border-radius:8px;
+    margin-bottom:8px;
+    font-size:13.5px;
+  }
+  .fila-eliminar .btn-x{
+    background:none;
+    border:none;
+    color:var(--rojo);
+    font-weight:700;
+    font-size:13px;
+    cursor:pointer;
+    padding:4px 6px;
+  }
+  /* --- Responsive: celular (por defecto) / tablet / PC --- */
+  @media (min-width:700px){
+    main{ max-width:760px; padding:22px 24px 48px; }
+    header{ padding:20px 24px 0; }
+    header h1{ font-size:19px; }
+    .tab{ font-size:13px; padding:12px 10px; }
+    .tab.tab-principal{ font-size:14px; }
+    .filtros-fila{ gap:16px; }
+    .campo{ font-size:14.5px; }
+    .btn-guardar, .btn-aplicar{ width:auto; min-width:220px; }
+  }
+  @media (min-width:1000px){
+    main{ max-width:960px; }
+    .filtros-box .filtros-fila{ flex-wrap:nowrap; }
+  }
+  @media (max-width:360px){
+    header h1{ font-size:15px; }
+    .tab{ font-size:9.5px; padding:8px 2px; }
+    .tab.tab-principal{ font-size:10.5px; }
+    main{ padding:12px; }
+  }
 </style>
 </head>
 <body>
@@ -339,6 +380,8 @@ let lineaDiarioAbierta = null;
 let consumoDiarioGlobal = null;     // [{medidorNum, nombre, historial:[{fecha,lectura,consumo}]}]
 let filtroDiarioMedicion = "";      // "" = todas, o medidorNum
 let filtroDiarioMes = null;         // "yyyy-mm"
+// --- Líneas calculadas (resta de dos medidores, solo Equipos) ---
+let calculadasGlobal = null;        // [{nombre, medidorA, medidorB}]
 function actualizarTabs(){
   document.getElementById("tabRegistro").classList.toggle("activo", vistaActual === "registro");
   document.getElementById("tabDiario").classList.toggle("activo", vistaActual === "diario");
@@ -404,10 +447,10 @@ async function irAAnalisis(){
   actualizarTabs();
   await renderAnalisis();
 }
-function irAAgregar(){
+async function irAAgregar(){
   vistaActual = "agregar";
   actualizarTabs();
-  renderAgregar();
+  await renderAgregar();
 }
 /* =========================================================
    PANTALLA: Equipos (Semanal) — registrar lecturas
@@ -694,15 +737,19 @@ async function guardarLecturaDiario(medidorNum, box){
 /* =========================================================
    PANTALLA: Agregar línea / medición
 ========================================================= */
-function renderAgregar(){
+async function renderAgregar(){
+  app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando...</div>`;
+  if (!lineasGlobal.length) await cargarLineas();
+  if (calculadasGlobal === null) await cargarCalculadas();
   app.innerHTML = `
-    <p class="subtitulo">Agrega una línea nueva, en Equipos (Semanal) o en Planta (Diario).</p>
+    <p class="subtitulo">Agrega una línea nueva: en Equipos (Semanal), en Planta (Diario), o calculada (resta de dos medidores).</p>
     <div class="linea-box">
       <div style="padding:16px;">
         <label>Tipo de línea</label>
         <select id="selTipoAgregar" class="campo">
           <option value="semanal">Equipos (Semanal)</option>
           <option value="diario">Planta (Diario)</option>
+          <option value="calculada">Línea calculada (resta de 2 medidores)</option>
         </select>
         <div id="campoNumMedidor" style="margin-top:12px;">
           <label>Número de medidor</label>
@@ -711,7 +758,18 @@ function renderAgregar(){
         <div id="notaDiario" style="display:none;margin-top:12px;font-size:12.5px;color:var(--gris);">
           El número de medición se asigna automáticamente.
         </div>
-        <div style="margin-top:12px;">
+        <div id="camposCalculada" style="display:none;margin-top:12px;">
+          <label>Medidor A (minuendo — mide el conjunto)</label>
+          <select id="selMedidorA" class="campo">
+            ${lineasGlobal.map(l => `<option value="${l.medidorNum}">MEDIDOR ${l.medidorNum} — ${l.nombre}</option>`).join("")}
+          </select>
+          <label style="margin-top:10px;">Medidor B (sustraendo — la parte a restar)</label>
+          <select id="selMedidorB" class="campo">
+            ${lineasGlobal.map(l => `<option value="${l.medidorNum}">MEDIDOR ${l.medidorNum} — ${l.nombre}</option>`).join("")}
+          </select>
+          <div style="margin-top:8px;font-size:12px;color:var(--gris);">Resultado = Medidor A − Medidor B.</div>
+        </div>
+        <div id="campoNombreNormal" style="margin-top:12px;">
           <label>Nombre</label>
           <input id="inputNuevaLinea" class="campo" type="text" placeholder="Ej: TUNEL DE CONGELADO">
         </div>
@@ -720,19 +778,98 @@ function renderAgregar(){
         <button class="btn-guardar" onclick="guardarNuevaLinea()">Agregar</button>
       </div>
     </div>
+    <p class="subtitulo" style="margin-top:22px;">Líneas calculadas existentes:</p>
+    <div id="listaCalculadas"></div>
   `;
   document.getElementById("selTipoAgregar").onchange = (e) => {
-    const esDiario = e.target.value === "diario";
-    document.getElementById("campoNumMedidor").style.display = esDiario ? "none" : "block";
-    document.getElementById("notaDiario").style.display = esDiario ? "block" : "none";
+    const tipo = e.target.value;
+    document.getElementById("campoNumMedidor").style.display = tipo === "semanal" ? "block" : "none";
+    document.getElementById("notaDiario").style.display = tipo === "diario" ? "block" : "none";
+    document.getElementById("camposCalculada").style.display = tipo === "calculada" ? "block" : "none";
+    document.getElementById("campoNombreNormal").style.display = "block";
   };
+  renderListaCalculadas();
+}
+async function cargarCalculadas(){
+  try{
+    const resp = await fetch(`${BASE_URL}?action=calculadas`);
+    const data = await resp.json();
+    calculadasGlobal = (data.ok && data.calculadas) ? data.calculadas : [];
+  }catch(e){
+    calculadasGlobal = [];
+  }
+}
+function nombreMedidorSemanal(medidorNum){
+  const l = lineasGlobal.find(x => x.medidorNum === medidorNum);
+  return l ? `MEDIDOR ${l.medidorNum} — ${l.nombre}` : `MEDIDOR ${medidorNum}`;
+}
+function renderListaCalculadas(){
+  const cont = document.getElementById("listaCalculadas");
+  if (!cont) return;
+  if (!calculadasGlobal.length){
+    cont.innerHTML = `<div class="vacio" style="margin-top:0;">No hay líneas calculadas todavía.</div>`;
+    return;
+  }
+  cont.innerHTML = calculadasGlobal.map(c => `
+    <div class="fila-eliminar">
+      <span>${c.nombre} = ${nombreMedidorSemanal(c.medidorA)} − ${nombreMedidorSemanal(c.medidorB)}</span>
+      <button class="btn-x" data-nombre="${c.nombre}">Eliminar</button>
+    </div>
+  `).join("");
+  cont.querySelectorAll(".btn-x").forEach(btn => {
+    btn.onclick = () => eliminarCalculadaConfirm(btn.dataset.nombre);
+  });
+}
+async function eliminarCalculadaConfirm(nombre){
+  if (!confirm(`¿Eliminar la línea calculada "${nombre}"?`)) return;
+  try{
+    const resp = await fetch(BASE_URL, { method:"POST", body: JSON.stringify({ accion:"eliminarCalculada", nombre }) });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || "Error desconocido");
+    calculadasGlobal = calculadasGlobal.filter(c => c.nombre !== nombre);
+    consumoGlobal = null;
+    renderListaCalculadas();
+  }catch(e){
+    alert("No se pudo eliminar: " + e.message);
+  }
 }
 async function guardarNuevaLinea(){
   const tipo = document.getElementById("selTipoAgregar").value;
-  const inputNum = document.getElementById("inputNumMedidor");
-  const inputNombre = document.getElementById("inputNuevaLinea");
   const errorDiv = document.getElementById("errorAgregar");
   const okDiv = document.getElementById("okAgregar");
+
+  if (tipo === "calculada"){
+    const nombre = document.getElementById("inputNuevaLinea").value.trim();
+    const medidorA = parseInt(document.getElementById("selMedidorA").value, 10);
+    const medidorB = parseInt(document.getElementById("selMedidorB").value, 10);
+    if (!nombre){
+      errorDiv.textContent = "Ingresa un nombre."; okDiv.textContent = ""; return;
+    }
+    if (medidorA === medidorB){
+      errorDiv.textContent = "Selecciona dos medidores distintos."; okDiv.textContent = ""; return;
+    }
+    errorDiv.textContent = "";
+    try{
+      const resp = await fetch(BASE_URL, {
+        method: "POST",
+        body: JSON.stringify({ accion:"agregarCalculada", nombre, medidorA, medidorB })
+      });
+      const data = await resp.json();
+      if (!data.ok) throw new Error(data.error || "Error desconocido");
+      consumoGlobal = null;
+      await cargarCalculadas();
+      okDiv.textContent = `✓ Línea calculada "${data.nombre}" guardada.`;
+      document.getElementById("inputNuevaLinea").value = "";
+      renderListaCalculadas();
+    }catch(e){
+      okDiv.textContent = "";
+      errorDiv.textContent = "No se pudo agregar: " + e.message;
+    }
+    return;
+  }
+
+  const inputNum = document.getElementById("inputNumMedidor");
+  const inputNombre = document.getElementById("inputNuevaLinea");
   const nombre = inputNombre.value.trim();
 
   let medidorNum = null;
@@ -930,7 +1067,8 @@ function calcularDatosGrafico(){
           if (String(p.fecha).slice(0,7) === filtroValor) valor += p.consumo;
         }
       });
-      items.push({ label: `M${l.medidorNum} ${l.nombre}`, valor: Number(valor.toFixed(2)) });
+      const label = l.calculada ? `${l.nombre} (calc.)` : `M${l.medidorNum} ${l.nombre}`;
+      items.push({ label: label, valor: Number(valor.toFixed(2)) });
     });
     items.sort((a, b) => ordenGrafico === "desc" ? b.valor - a.valor : a.valor - b.valor);
   }else{
