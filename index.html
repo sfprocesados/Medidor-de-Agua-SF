@@ -293,6 +293,45 @@
   }
   .kg-bloque .estado{text-align:center;margin-bottom:10px;}
   .kg-bloque .campo{font-size:17px;min-width:0;}
+  /* --- Análisis: indicadores, tablas y gráficos de líneas --- */
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;}
+  .kpi{background:#fff;border:1px solid var(--borde);border-radius:10px;padding:12px 14px;}
+  .kpi .et{font-size:12px;color:#5c6975;}
+  .kpi .val{font-size:24px;font-weight:700;color:var(--texto);margin:4px 0 2px;}
+  .kpi .uni{font-size:13px;font-weight:600;color:#5c6975;margin-left:4px;}
+  .kpi-delta{font-size:12px;color:#3d4a56;}
+  .kpi-delta.sin{color:var(--gris);}
+  .ic{font-size:11px;margin-right:3px;}
+  .ic.bueno{color:#0ca30c;}
+  .ic.malo{color:#d03b3b;}
+  .ic.neutro{color:var(--gris);}
+  .kpi .nota{font-size:11.5px;color:var(--gris);margin-top:4px;line-height:1.35;}
+  .tabla-scroll{overflow-x:auto;}
+  .tabla-var{width:100%;border-collapse:collapse;font-size:13px;}
+  .tabla-var th{font-size:11.5px;font-weight:700;color:#5c6975;text-align:right;padding:6px 6px;border-bottom:1px solid var(--borde);white-space:nowrap;}
+  .tabla-var th:first-child, .tabla-var td:first-child{text-align:left;}
+  .tabla-var td{padding:8px 6px;border-bottom:1px solid #eef1f4;text-align:right;color:var(--texto);font-variant-numeric:tabular-nums;vertical-align:top;}
+  .tabla-var td:first-child{font-variant-numeric:normal;}
+  .tabla-var td .sub{display:block;font-size:11px;color:var(--gris);}
+  .tag-rev{display:inline-block;margin-top:2px;font-size:11px;font-weight:700;color:#7a1f1f;background:#fbeaea;border-radius:10px;padding:1px 7px;}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 10px;}
+  .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--borde);background:#fff;border-radius:20px;padding:5px 10px;font-size:12px;color:#3d4a56;cursor:pointer;}
+  .chip .key{width:12px;height:3px;border-radius:2px;background:transparent;border:1px solid #b6c0ca;box-sizing:content-box;}
+  .chip.activo{background:#f2f5f8;border-color:#8a97a3;font-weight:600;color:var(--texto);}
+  .chip.activo .key{border:none;background:var(--c);height:4px;}
+  .lc-wrap{position:relative;}
+  .lc-wrap svg{display:block;touch-action:pan-x pan-y;outline:none;}
+  .lc-wrap svg:focus-visible{outline:2px solid var(--azul);outline-offset:2px;}
+  .lc-tip{position:absolute;top:8px;background:#fff;border:1px solid var(--borde);border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.12);pointer-events:none;z-index:5;min-width:130px;display:none;}
+  .lc-tip .t{font-weight:700;color:var(--texto);margin-bottom:4px;}
+  .lc-tip .r{display:flex;align-items:center;gap:6px;margin-top:3px;}
+  .lc-tip .k{width:12px;height:3px;border-radius:2px;flex:none;}
+  .lc-tip .v{font-weight:700;color:var(--texto);}
+  .lc-tip .n{color:#5c6975;}
+  .lc-leyenda{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:12px;color:#3d4a56;}
+  .lc-leyenda span{display:inline-flex;align-items:center;gap:6px;}
+  .lc-leyenda .k{width:12px;height:3px;border-radius:2px;display:inline-block;}
+  .nota-chica{font-size:11.5px;color:var(--gris);margin:8px 2px 0;line-height:1.4;}
   /* --- Responsive: celular (por defecto) / tablet / PC --- */
   @media (min-width:700px){
     main{ max-width:760px; padding:22px 24px 48px; }
@@ -424,10 +463,34 @@ function actualizarTabs(){
   document.getElementById("tabConsumo").classList.toggle("activo", vistaActual === "consumo");
   document.getElementById("tabAgregar").classList.toggle("activo", vistaActual === "agregar");
 }
+/* Precarga: al abrir la app se piden todos los datos a la vez, para que
+   cada pestaña ya los tenga listos cuando se abra. */
+const precarga = {};
+const PRECARGA_MS = 90000;
+function precargar(url){
+  precarga[url] = { t: Date.now(), p: fetch(url).then(r => r.json()).catch(() => null) };
+}
+function getJSON(url){
+  const e = precarga[url];
+  delete precarga[url];
+  const directo = () => fetch(url).then(r => r.json());
+  if (e && Date.now() - e.t < PRECARGA_MS) return e.p.then(d => d || directo());
+  return directo();
+}
+function olvidarPrecarga(){ Object.keys(precarga).forEach(k => delete precarga[k]); }
+function precargarTodo(){
+  const u = BASE_URL + "?action=";
+  precargar(u + "lineas&tipo=semanal");
+  precargar(u + "lineas&tipo=diario");
+  precargar(u + "lecturas&tipo=semanal&semana=" + semanaActual);
+  precargar(u + "lecturas&tipo=diario&fecha=" + fechaDiarioActual);
+  precargar(u + "kg");
+  precargar(u + "consumo&tipo=semanal");
+  precargar(u + "consumo&tipo=diario");
+}
 async function obtenerLineasDesdeBackend(tipo){
   try{
-    const resp = await fetch(`${BASE_URL}?action=lineas&tipo=${tipo}`);
-    const data = await resp.json();
+    const data = await getJSON(`${BASE_URL}?action=lineas&tipo=${tipo}`);
     return (data.ok && data.lineas) ? data.lineas : [];
   }catch(e){
     return [];
@@ -439,7 +502,7 @@ async function cargarLineas(){
     sembrandoLineas = true;
     for (const l of LINEAS_POR_DEFECTO){
       try{
-        await fetch(BASE_URL, {
+        olvidarPrecarga(); await fetch(BASE_URL, {
           method: "POST",
           body: JSON.stringify({ accion:"agregarLinea", tipo:"semanal", medidorNum: l.medidorNum, nombre: l.nombre })
         });
@@ -455,7 +518,7 @@ async function cargarLineasDiario(){
     sembrandoLineasDiario = true;
     for (const l of LINEAS_DIARIO_POR_DEFECTO){
       try{
-        await fetch(BASE_URL, {
+        olvidarPrecarga(); await fetch(BASE_URL, {
           method: "POST",
           body: JSON.stringify({ accion:"agregarLinea", tipo:"diario", medidorNum: l.medidorNum, nombre: l.nombre })
         });
@@ -559,8 +622,7 @@ async function refrescarSemanaActual(){
 }
 async function cargarLecturasSemana(){
   try{
-    const resp = await fetch(`${BASE_URL}?action=lecturas&tipo=semanal&semana=${semanaActual}`);
-    const data = await resp.json();
+    const data = await getJSON(`${BASE_URL}?action=lecturas&tipo=semanal&semana=${semanaActual}`);
     lecturasSemana = (data.ok && data.lecturas) ? data.lecturas : {};
   }catch(e){
     lecturasSemana = {};
@@ -622,7 +684,7 @@ async function guardarLectura(medidorNum, box){
   const textoOriginal = btn.textContent;
   btn.textContent = "Guardando...";
   try{
-    const resp = await fetch(BASE_URL, {
+    olvidarPrecarga(); const resp = await fetch(BASE_URL, {
       method: "POST",
       body: JSON.stringify({ accion:"guardarLectura", tipo:"semanal", medidorNum, semana: semanaActual, fecha: fechaActual, lectura: valor })
     });
@@ -654,8 +716,7 @@ function kgRegistrado(clave, semana){
 }
 async function cargarKg(){
   try{
-    const resp = await fetch(`${BASE_URL}?action=kg`);
-    const data = await resp.json();
+    const data = await getJSON(`${BASE_URL}?action=kg`);
     if (!data.ok) throw new Error(data.error || "Error desconocido");
     kgGlobal = { embutidos: data.kg.embutidos || {}, empacado: data.kg.empacado || {} };
     return true;
@@ -766,7 +827,7 @@ async function guardarKgSemana(){
   const fallos = [];
   await Promise.all(tareas.map(async t => {
     try{
-      const resp = await fetch(BASE_URL, {
+      olvidarPrecarga(); const resp = await fetch(BASE_URL, {
         method: "POST",
         body: JSON.stringify({ accion:"guardarKg", producto: t.p.clave, semana, kg: t.kg })
       });
@@ -843,8 +904,7 @@ async function refrescarFechaDiario(){
 }
 async function cargarLecturasDiario(){
   try{
-    const resp = await fetch(`${BASE_URL}?action=lecturas&tipo=diario&fecha=${fechaDiarioActual}`);
-    const data = await resp.json();
+    const data = await getJSON(`${BASE_URL}?action=lecturas&tipo=diario&fecha=${fechaDiarioActual}`);
     lecturasDiario = (data.ok && data.lecturas) ? data.lecturas : {};
   }catch(e){
     lecturasDiario = {};
@@ -906,7 +966,7 @@ async function guardarLecturaDiario(medidorNum, box){
   const textoOriginal = btn.textContent;
   btn.textContent = "Guardando...";
   try{
-    const resp = await fetch(BASE_URL, {
+    olvidarPrecarga(); const resp = await fetch(BASE_URL, {
       method: "POST",
       body: JSON.stringify({ accion:"guardarLectura", tipo:"diario", medidorNum, fecha: fechaDiarioActual, lectura: valor })
     });
@@ -985,7 +1045,7 @@ async function guardarNuevaLinea(){
   try{
     const body = { accion:"agregarLinea", tipo, nombre };
     if (tipo === "semanal") body.medidorNum = medidorNum;
-    const resp = await fetch(BASE_URL, { method: "POST", body: JSON.stringify(body) });
+    olvidarPrecarga(); const resp = await fetch(BASE_URL, { method: "POST", body: JSON.stringify(body) });
     const data = await resp.json();
     if (!data.ok) throw new Error(data.error || "Error desconocido");
     if (tipo === "semanal"){
@@ -1008,37 +1068,32 @@ async function guardarNuevaLinea(){
 ========================================================= */
 async function renderAnalisis(){
   app.innerHTML = `<div class="cargando"><div class="spinner"></div>Cargando datos...</div>`;
-  if (!lineasGlobal.length) await cargarLineas();
-  if (consumoGlobal === null){
-    try{
-      const resp = await fetch(BASE_URL + "?action=consumo&tipo=semanal");
-      const data = await resp.json();
-      if (!data.ok) throw new Error(data.error || "Error desconocido");
-      consumoGlobal = data.data;
-    }catch(e){
-      app.innerHTML = `<div class="mensaje-error" style="margin-top:40px;text-align:center;">No se pudo cargar: ${e.message}</div>`;
-      return;
-    }
-  }
-  if (!lineasDiarioGlobal.length) await cargarLineasDiario();
-  if (consumoDiarioGlobal === null){
-    try{
-      const resp2 = await fetch(BASE_URL + "?action=consumo&tipo=diario");
-      const data2 = await resp2.json();
-      consumoDiarioGlobal = data2.ok ? data2.data : [];
-    }catch(e){
-      consumoDiarioGlobal = [];
-    }
+  // Todo se pide en paralelo para que la pantalla abra más rápido.
+  const pLineas = lineasGlobal.length ? Promise.resolve() : cargarLineas();
+  const pLineasD = lineasDiarioGlobal.length ? Promise.resolve() : cargarLineasDiario();
+  const pKg = (kgGlobal === null) ? cargarKg() : Promise.resolve(true);
+  const pSem = (consumoGlobal !== null) ? Promise.resolve(null) : getJSON(BASE_URL + "?action=consumo&tipo=semanal")
+    .then(d => { if (!d.ok) throw new Error(d.error || "Error desconocido"); consumoGlobal = d.data; return null; })
+    .catch(e => e.message);
+  const pDia = (consumoDiarioGlobal !== null) ? Promise.resolve() : getJSON(BASE_URL + "?action=consumo&tipo=diario")
+    .then(d => { consumoDiarioGlobal = d.ok ? d.data : []; })
+    .catch(() => { consumoDiarioGlobal = []; });
+  const [, , , errSem] = await Promise.all([pLineas, pLineasD, pKg, pSem, pDia]).then(r => [r[0], r[1], r[2], r[3]]);
+  if (errSem){
+    app.innerHTML = `<div class="mensaje-error" style="margin-top:40px;text-align:center;">No se pudo cargar: ${errSem}</div>`;
+    return;
   }
   renderPantallaAnalisis();
 }
 async function refrescarAnalisis(){
   consumoGlobal = null;
   consumoDiarioGlobal = null;
+  kgGlobal = null;
   await renderAnalisis();
 }
 function renderPantallaAnalisis(){
-  app.innerHTML = construirSeccionEquipos() + construirSeccionDiario();
+  app.innerHTML = construirResumen() + construirSeccionEquipos() + construirSeccionDiario();
+  activarResumen();
 
   if (document.getElementById("selLinea")){
     const semanas = obtenerSemanasDisponibles();
@@ -1422,8 +1477,518 @@ function renderBarChartDiario(container, fechas, series){
   `;
 }
 /* =========================================================
+   ANÁLISIS: resumen de la semana, variación por equipo,
+   kg por m³ y comparativo de líneas por equipo
+========================================================= */
+// Paleta categórica validada (orden fijo). El color sigue al equipo: al
+// quitar uno de la selección, los demás conservan su color.
+const PALETA_SERIES = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#6250d6","#e34948"];
+const MAX_LINEAS = 8;
+const UMBRAL_PCT = 20;   // % de subida para marcar "Revisar"
+const UMBRAL_M3 = 5;     // y al menos esta cantidad de m³
+let resSemana = null;    // semana del resumen
+let resBase = null;      // "equipos" o medidorNum (texto) de una medición diaria
+let cmpRango = 12;       // últimas N semanas (0 = todas)
+let cmpSeleccion = null; // [medidorNum] equipos en el gráfico comparativo
+let cmpSlots = {};       // medidorNum -> posición en la paleta
+let tablaTend = false;
+let tablaCmp = false;
+
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+function fmtN(v, dec){
+  if (v === null || v === undefined || isNaN(v)) return "—";
+  const d = dec === undefined ? 1 : dec;
+  return Number(v).toLocaleString("es-PE", { minimumFractionDigits: 0, maximumFractionDigits: d });
+}
+function datosKg(){ return kgGlobal || { embutidos: {}, empacado: {} }; }
+function kgSem(clave, sem){
+  const v = datosKg()[clave][sem];
+  return v === undefined ? null : v;
+}
+function consumoDe(linea, sem){
+  const p = linea.historial.find(x => x.semana === sem);
+  return (p && p.consumo !== null) ? p.consumo : null;
+}
+function semanasConDatos(){
+  const set = new Set();
+  consumoGlobal.forEach(l => l.historial.forEach(p => { if (p.consumo !== null) set.add(p.semana); }));
+  (consumoDiarioGlobal || []).forEach(l => l.historial.forEach(p => { if (p.consumo !== null) set.add(p.semana); }));
+  const kg = datosKg();
+  ["embutidos","empacado"].forEach(c => Object.keys(kg[c]).forEach(s => set.add(Number(s))));
+  return Array.from(set).sort((a, b) => b - a);
+}
+function m3Equipos(sem){
+  let t = 0, hay = false;
+  consumoGlobal.forEach(l => { const c = consumoDe(l, sem); if (c !== null){ t += c; hay = true; } });
+  return hay ? t : null;
+}
+function m3Diario(sem, medidorNum){
+  const l = (consumoDiarioGlobal || []).find(x => x.medidorNum === medidorNum);
+  let t = 0, d = 0;
+  if (l) l.historial.forEach(p => { if (p.semana === sem && p.consumo !== null){ t += p.consumo; d++; } });
+  return { m3: d ? t : null, dias: d };
+}
+function m3Base(sem){
+  if (resBase === "equipos") return { m3: m3Equipos(sem), dias: null };
+  return m3Diario(sem, Number(resBase));
+}
+function nombreBase(){
+  if (resBase === "equipos") return "suma de equipos";
+  const l = lineasDiarioGlobal.find(x => String(x.medidorNum) === resBase);
+  return l ? l.nombre : "base";
+}
+function ratio(kg, m3){ return (kg !== null && m3 !== null && m3 > 0) ? kg / m3 : null; }
+// subeEsBueno: true si que suba es mejor (kg/m³); false si es peor (consumo).
+function variacion(act, prev, subeEsBueno){
+  if (act === null || prev === null || prev === 0) return null;
+  const pct = (act - prev) / prev * 100;
+  if (Math.abs(pct) < 0.5) return { dir: "flat", pct: 0, bueno: null };
+  return { dir: pct > 0 ? "up" : "down", pct, bueno: (pct > 0) === subeEsBueno };
+}
+function prepararResumen(){
+  const sems = semanasConDatos();
+  if (!sems.length) return false;
+  if (resSemana === null || !sems.includes(resSemana)){
+    const conEq = sems.find(s => m3Equipos(s) !== null);
+    resSemana = conEq !== undefined ? conEq : sems[0];
+  }
+  const baseValida = resBase === "equipos" || lineasDiarioGlobal.some(l => String(l.medidorNum) === resBase);
+  if (resBase === null || !baseValida){
+    // Por defecto: el medidor de "Planta" si ya tiene consumos; si no, la suma de equipos.
+    const pl = lineasDiarioGlobal.find(l => /planta/i.test(l.nombre));
+    const plTiene = pl && (consumoDiarioGlobal || []).some(c => c.medidorNum === pl.medidorNum && c.historial.some(p => p.consumo !== null));
+    resBase = plTiene ? String(pl.medidorNum) : "equipos";
+  }
+  if (cmpSeleccion === null){
+    const ranking = consumoGlobal
+      .map(l => ({ id: l.medidorNum, c: consumoDe(l, resSemana) }))
+      .filter(x => x.c !== null)
+      .sort((a, b) => b.c - a.c)
+      .slice(0, 5);
+    cmpSeleccion = ranking.map(x => x.id);
+    cmpSlots = {};
+    cmpSeleccion.forEach((id, i) => { cmpSlots[id] = i; });
+  }
+  return true;
+}
+function construirResumen(){
+  if (!prepararResumen()){
+    return `
+      <p class="subtitulo-seccion">Resumen y alertas</p>
+      <div class="vacio" style="margin:0 0 26px;">Todavía no hay datos suficientes. Se necesitan al menos 2 lecturas semanales por medidor para calcular consumos.</div>`;
+  }
+  const sems = semanasConDatos();
+  const optsBase = [`<option value="equipos" ${resBase==="equipos"?"selected":""}>Suma de equipos (Semanal)</option>`]
+    .concat(lineasDiarioGlobal.map(l => `<option value="${l.medidorNum}" ${resBase===String(l.medidorNum)?"selected":""}>${esc(l.nombre)} (Diario)</option>`)).join("");
+  return `
+    <div id="resumenCont">
+      <p class="subtitulo-seccion">Resumen y alertas</p>
+      <div class="filtros-box">
+        <div class="filtros-fila">
+          <div>
+            <label>Semana</label>
+            <select id="selResSemana" class="campo">
+              ${sems.map(s => `<option value="${s}" ${s===resSemana?"selected":""}>Semana ${s}</option>`).join("")}
+            </select>
+          </div>
+          <div>
+            <label>Gráficos: últimas</label>
+            <select id="selResRango" class="campo">
+              ${[[8,"8 semanas"],[12,"12 semanas"],[26,"26 semanas"],[0,"Todas"]].map(r => `<option value="${r[0]}" ${cmpRango===r[0]?"selected":""}>${r[1]}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div class="filtros-fila">
+          <div>
+            <label>Base de agua para kg por m³</label>
+            <select id="selResBase" class="campo">${optsBase}</select>
+          </div>
+        </div>
+      </div>
+      <div id="resKpis"></div>
+      <div class="grafico-box">
+        <p class="grafico-titulo" id="tituloVar"></p>
+        <div id="resVariacion" class="tabla-scroll"></div>
+        <p class="nota-chica">Se marca “Revisar” cuando un equipo sube ${UMBRAL_PCT}% o más y al menos ${UMBRAL_M3} m³ frente a la semana anterior.</p>
+      </div>
+      <div class="grafico-box">
+        <p class="grafico-titulo">Kg por m³ por semana
+          <button id="btnTablaTend" class="link-actualizar" style="float:right;"></button>
+        </p>
+        <div id="graficoTend"></div>
+        <p class="nota-chica" id="notaTend"></p>
+      </div>
+      <div class="grafico-box">
+        <p class="grafico-titulo">Consumo semanal por equipo (m³)
+          <button id="btnTablaCmp" class="link-actualizar" style="float:right;"></button>
+        </p>
+        <div id="chipsCmp" class="chips"></div>
+        <div id="avisoCmp" class="nota-chica" style="margin:-4px 0 8px;"></div>
+        <div id="graficoCmp"></div>
+      </div>
+    </div>`;
+}
+function activarResumen(){
+  if (!document.getElementById("resumenCont")) return;
+  document.getElementById("selResSemana").onchange = (e) => { resSemana = Number(e.target.value); refrescarResumen(); };
+  document.getElementById("selResRango").onchange = (e) => { cmpRango = Number(e.target.value); refrescarResumen(); };
+  document.getElementById("selResBase").onchange = (e) => { resBase = e.target.value; refrescarResumen(); };
+  document.getElementById("btnTablaTend").onclick = () => { tablaTend = !tablaTend; dibujarTendencia(); };
+  document.getElementById("btnTablaCmp").onclick = () => { tablaCmp = !tablaCmp; dibujarComparativo(); };
+  refrescarResumen();
+}
+function refrescarResumen(){
+  pintarKpis();
+  pintarVariacion();
+  dibujarTendencia();
+  pintarChips();
+  dibujarComparativo();
+}
+function semanasRango(){
+  const todas = semanasConDatos().slice().sort((a, b) => a - b);
+  return cmpRango > 0 ? todas.slice(-cmpRango) : todas;
+}
+/* --- Indicadores (tiles) --- */
+function deltaHtml(v, sp){
+  if (!v) return `<div class="kpi-delta sin">Sin semana ${sp} para comparar</div>`;
+  const icono = v.dir === "up" ? "▲" : (v.dir === "down" ? "▼" : "●");
+  const cls = v.bueno === null ? "neutro" : (v.bueno ? "bueno" : "malo");
+  const txt = v.dir === "flat" ? "Sin cambio" : `${v.pct > 0 ? "+" : ""}${fmtN(v.pct, 1)}%`;
+  return `<div class="kpi-delta"><span class="ic ${cls}">${icono}</span>${txt} vs semana ${sp}</div>`;
+}
+function tileHtml(etiqueta, valor, unidad, deltaStr, nota){
+  return `
+    <div class="kpi">
+      <div class="et">${etiqueta}</div>
+      <div class="val">${valor}${unidad ? `<span class="uni">${unidad}</span>` : ""}</div>
+      ${deltaStr}
+      <div class="nota">${nota}</div>
+    </div>`;
+}
+function pintarKpis(){
+  const s = resSemana, sp = s - 1;
+  const base = m3Base(s), baseP = m3Base(sp);
+  const esEq = resBase === "equipos";
+  const tiles = [];
+
+  tiles.push(tileHtml(
+    `Consumo de agua — ${esc(nombreBase())}`,
+    fmtN(base.m3, 1), base.m3 === null ? "" : "m³",
+    deltaHtml(variacion(base.m3, baseP.m3, false), sp),
+    base.m3 === null ? "Sin lecturas esa semana" : (esEq ? "Suma de todos los equipos" : `${base.dias}/7 días con lectura`)
+  ));
+
+  [["embutidos","Embutidos"],["empacado","Empacado"]].forEach(par => {
+    const kg = kgSem(par[0], s), kgP = kgSem(par[0], sp);
+    const r = ratio(kg, base.m3), rP = ratio(kgP, baseP.m3);
+    let nota;
+    if (kg === null) nota = "Falta registrar los kg de esta semana";
+    else if (base.m3 === null) nota = "Falta el consumo de agua de esta semana";
+    else nota = `${fmtN(kg, 0)} kg ÷ ${fmtN(base.m3, 1)} m³`;
+    tiles.push(tileHtml(`Kg por m³ — ${par[1]}`, fmtN(r, 1), r === null ? "" : "kg/m³",
+      deltaHtml(variacion(r, rP, true), sp), nota));
+  });
+
+  const eq = m3Equipos(s);
+  if (!esEq){
+    const cov = (eq !== null && base.m3 !== null && base.m3 > 0) ? eq / base.m3 * 100 : null;
+    let nota = "Sin datos para comparar";
+    if (cov !== null) nota = `Equipos: ${fmtN(eq, 1)} m³ de ${fmtN(base.m3, 1)} m³. ` + (cov > 100 ? "Supera 100%: revisar lecturas." : "El resto no tiene medidor propio.");
+    tiles.push(tileHtml("Cobertura de equipos", fmtN(cov, 0), cov === null ? "" : "%", `<div class="kpi-delta sin">Equipos medidos vs ${esc(nombreBase())}</div>`, nota));
+  }
+
+  let top = null;
+  consumoGlobal.forEach(l => { const c = consumoDe(l, s); if (c !== null && (top === null || c > top.c)) top = { l, c }; });
+  if (top && eq > 0){
+    tiles.push(tileHtml("Mayor consumidor (equipos)", fmtN(top.c / eq * 100, 0), "%",
+      `<div class="kpi-delta sin">${fmtN(top.c, 1)} m³ en la semana</div>`, esc(`M${top.l.medidorNum} ${top.l.nombre}`)));
+  }
+  document.getElementById("resKpis").innerHTML = `<div class="kpi-grid">${tiles.join("")}</div>`;
+}
+/* --- Tabla de variación por equipo --- */
+function pintarVariacion(){
+  const s = resSemana, sp = s - 1;
+  document.getElementById("tituloVar").textContent = `Variación por equipo — semana ${s} vs ${sp} (m³)`;
+  const filas = [];
+  consumoGlobal.forEach(l => {
+    const a = consumoDe(l, s), b = consumoDe(l, sp);
+    if (a === null && b === null) return;
+    const delta = (a !== null && b !== null) ? a - b : null;
+    const pct = (delta !== null && b > 0) ? delta / b * 100 : null;
+    const revisar = delta !== null && pct !== null && delta >= UMBRAL_M3 && pct >= UMBRAL_PCT;
+    filas.push({ nombre: `M${l.medidorNum} ${l.nombre}`, a, b, delta, pct, revisar });
+  });
+  filas.sort((x, y) => (y.delta === null ? -Infinity : y.delta) - (x.delta === null ? -Infinity : x.delta));
+  const cont = document.getElementById("resVariacion");
+  if (!filas.length){
+    cont.innerHTML = `<div class="vacio" style="margin:10px 0;">No hay consumos para estas semanas.</div>`;
+    return;
+  }
+  const filasHtml = filas.map(f => {
+    let varCelda = "—";
+    if (f.pct !== null){
+      const sube = f.delta > 0;
+      const cls = f.delta === 0 ? "neutro" : (sube ? "malo" : "bueno");
+      const ic = f.delta === 0 ? "●" : (sube ? "▲" : "▼");
+      varCelda = `<span class="ic ${cls}">${ic}</span>${f.pct > 0 ? "+" : ""}${fmtN(f.pct, 0)}%<span class="sub">${f.delta > 0 ? "+" : ""}${fmtN(f.delta, 1)} m³</span>`
+        + (f.revisar ? `<span class="tag-rev">⚠ Revisar</span>` : "");
+    }
+    return `<tr><td>${esc(f.nombre)}</td><td>${fmtN(f.b, 1)}</td><td>${fmtN(f.a, 1)}</td><td>${varCelda}</td></tr>`;
+  }).join("");
+  cont.innerHTML = `
+    <table class="tabla-var">
+      <thead><tr><th>Equipo</th><th>Sem ${sp}</th><th>Sem ${s}</th><th>Variación</th></tr></thead>
+      <tbody>${filasHtml}</tbody>
+    </table>`;
+}
+/* --- Gráfico: kg por m³ por semana --- */
+function dibujarTendencia(){
+  const cont = document.getElementById("graficoTend");
+  document.getElementById("btnTablaTend").textContent = tablaTend ? "Ver gráfico" : "Ver tabla";
+  const semanas = semanasRango();
+  const serie = (clave) => semanas.map(s => ratio(kgSem(clave, s), m3Base(s).m3));
+  document.getElementById("notaTend").textContent =
+    `Kg producidos ÷ m³ de agua (${nombreBase()}), cruzados por número de semana. Más alto = más kg por cada m³ de agua.`;
+  renderLineChart(cont, {
+    semanas,
+    series: [
+      { nombre: "Embutidos", color: PALETA_SERIES[0], valores: serie("embutidos") },
+      { nombre: "Empacado",  color: PALETA_SERIES[1], valores: serie("empacado") }
+    ],
+    unidad: "kg/m³", dec: 1, leyenda: true, valoresFinales: true, tabla: tablaTend
+  });
+}
+/* --- Gráfico: comparativo de equipos --- */
+function pintarChips(){
+  const cont = document.getElementById("chipsCmp");
+  cont.innerHTML = consumoGlobal.map(l => {
+    const sel = cmpSeleccion.includes(l.medidorNum);
+    const color = sel ? PALETA_SERIES[cmpSlots[l.medidorNum]] : "transparent";
+    return `<button class="chip ${sel ? "activo" : ""}" style="--c:${color}" data-id="${l.medidorNum}"><span class="key"></span>${esc(`M${l.medidorNum} ${l.nombre}`)}</button>`;
+  }).join("");
+  cont.querySelectorAll(".chip").forEach(btn => {
+    btn.onclick = () => alternarEquipo(Number(btn.dataset.id));
+  });
+}
+function alternarEquipo(id){
+  const aviso = document.getElementById("avisoCmp");
+  aviso.textContent = "";
+  if (cmpSeleccion.includes(id)){
+    cmpSeleccion = cmpSeleccion.filter(x => x !== id);
+    delete cmpSlots[id];
+  }else{
+    if (cmpSeleccion.length >= MAX_LINEAS){
+      aviso.textContent = `Máximo ${MAX_LINEAS} equipos a la vez. Quita uno para agregar otro.`;
+      return;
+    }
+    const usados = Object.values(cmpSlots);
+    let slot = 0;
+    while (usados.includes(slot)) slot++;
+    cmpSlots[id] = slot;
+    cmpSeleccion.push(id);
+  }
+  pintarChips();
+  dibujarComparativo();
+}
+function dibujarComparativo(){
+  document.getElementById("btnTablaCmp").textContent = tablaCmp ? "Ver gráfico" : "Ver tabla";
+  const cont = document.getElementById("graficoCmp");
+  if (!cmpSeleccion.length){
+    cont.innerHTML = `<div class="vacio" style="margin:10px 0;">Elige uno o más equipos arriba.</div>`;
+    return;
+  }
+  const semanas = semanasRango();
+  const series = cmpSeleccion.map(id => {
+    const l = consumoGlobal.find(x => x.medidorNum === id);
+    return {
+      nombre: `M${id} ${l ? l.nombre : ""}`.trim(),
+      color: PALETA_SERIES[cmpSlots[id]],
+      valores: semanas.map(s => l ? consumoDe(l, s) : null)
+    };
+  });
+  renderLineChart(cont, { semanas, series, unidad: "m³", dec: 1, leyenda: false, valoresFinales: false, tabla: tablaCmp });
+}
+/* --- Gráfico de líneas genérico (SVG) con cursor y tooltip --- */
+function escalaY(max){
+  if (!(max > 0)) return { max: 1, paso: 0.25 };
+  const bruto = max / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(bruto)));
+  const norm = bruto / mag;
+  const paso = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  return { paso, max: Math.ceil(max / paso - 1e-9) * paso };
+}
+function tablaLineChart(cfg){
+  const wrap = document.createElement("div");
+  wrap.className = "tabla-scroll";
+  const t = document.createElement("table");
+  t.className = "tabla-var";
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  ["Semana"].concat(cfg.series.map(s => s.nombre)).forEach(txt => {
+    const th = document.createElement("th");
+    th.textContent = txt;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  t.appendChild(thead);
+  const tb = document.createElement("tbody");
+  cfg.semanas.forEach((sem, i) => {
+    const tr = document.createElement("tr");
+    const td0 = document.createElement("td");
+    td0.textContent = String(sem);
+    tr.appendChild(td0);
+    cfg.series.forEach(s => {
+      const td = document.createElement("td");
+      td.textContent = fmtN(s.valores[i], cfg.dec);
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  wrap.appendChild(t);
+  return wrap;
+}
+function renderLineChart(cont, cfg){
+  const { semanas, series } = cfg;
+  const hayDatos = series.some(s => s.valores.some(v => v !== null));
+  if (!semanas.length || !hayDatos){
+    cont.innerHTML = `<div class="vacio" style="margin:10px 0;">No hay datos para mostrar todavía.</div>`;
+    return;
+  }
+  if (cfg.tabla){
+    cont.innerHTML = "";
+    cont.appendChild(tablaLineChart(cfg));
+    return;
+  }
+  const n = semanas.length;
+  const ml = 44, mr = cfg.valoresFinales ? 48 : 16, mt = 14, mb = 30, H = 240;
+  const W = Math.max(300, cont.clientWidth || 320, n * 46 + ml + mr);
+  const pw = W - ml - mr, ph = H - mt - mb;
+  let max = 0;
+  series.forEach(s => s.valores.forEach(v => { if (v !== null && v > max) max = v; }));
+  const esc_ = escalaY(max);
+  const X = i => ml + (n === 1 ? pw / 2 : i * pw / (n - 1));
+  const Y = v => mt + ph - (v / esc_.max) * ph;
+
+  let g = "";
+  for (let t = 0; t <= esc_.max + 1e-9; t += esc_.paso){
+    g += `<line x1="${ml}" y1="${Y(t).toFixed(1)}" x2="${W - mr}" y2="${Y(t).toFixed(1)}" stroke="#e4e9ee" stroke-width="1"/>`;
+    g += `<text x="${ml - 6}" y="${(Y(t) + 3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="#8a97a3">${fmtN(t, 2)}</text>`;
+  }
+  const salto = Math.max(1, Math.ceil(34 / (n > 1 ? pw / (n - 1) : pw)));
+  semanas.forEach((s, i) => {
+    if (i % salto !== 0 && i !== n - 1) return;
+    if (i === n - 1 && i % salto !== 0 && (n - 1 - Math.floor((n - 1) / salto) * salto) < salto / 2) return;
+    g += `<text x="${X(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="10" fill="#5c6975">S${s}</text>`;
+  });
+
+  let lineas = "", puntos = "";
+  series.forEach(s => {
+    let d = "", pluma = false;
+    s.valores.forEach((v, i) => {
+      if (v === null){ pluma = false; return; }
+      d += (pluma ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " ";
+      pluma = true;
+    });
+    lineas += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    s.valores.forEach((v, i) => {
+      if (v === null) return;
+      const aislado = (i === 0 || s.valores[i - 1] === null) && (i === n - 1 || s.valores[i + 1] === null);
+      const ultimo = !s.valores.slice(i + 1).some(w => w !== null);
+      if (n <= 14 || aislado || ultimo){
+        puntos += `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="4" fill="${s.color}" stroke="#fff" stroke-width="2"/>`;
+      }
+    });
+  });
+
+  let etiquetas = "";
+  if (cfg.valoresFinales){
+    const fin = series.map(s => {
+      let i = s.valores.length - 1;
+      while (i >= 0 && s.valores[i] === null) i--;
+      return i < 0 ? null : { i, v: s.valores[i], y: Y(s.valores[i]) };
+    }).filter(Boolean).sort((a, b) => a.y - b.y);
+    let ultimaY = -Infinity;
+    fin.forEach(f => {
+      if (f.y - ultimaY < 13) return;   // si chocan, se omite y queda el tooltip
+      ultimaY = f.y;
+      etiquetas += `<text x="${(X(f.i) + 9).toFixed(1)}" y="${(f.y + 4).toFixed(1)}" font-size="11" font-weight="700" fill="#1c2733">${fmtN(f.v, cfg.dec)}</text>`;
+    });
+  }
+
+  const leyenda = (cfg.leyenda && series.length > 1)
+    ? `<div class="lc-leyenda">${series.map(s => `<span><i class="k" style="background:${s.color}"></i>${esc(s.nombre)}</span>`).join("")}</div>` : "";
+  const resumenA11y = `Gráfico de líneas, ${series.length} serie(s), semanas ${semanas[0]} a ${semanas[n - 1]}. Use las flechas para ver los valores.`;
+  cont.innerHTML = `
+    <div style="overflow-x:auto;">
+      <div class="lc-wrap" style="width:${W}px;">
+        <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" tabindex="0" role="img" aria-label="${esc(resumenA11y)}">
+          ${g}${lineas}${puntos}${etiquetas}
+          <line class="cur" x1="0" y1="${mt}" x2="0" y2="${mt + ph}" stroke="#8a97a3" stroke-width="1" style="display:none"/>
+          <g class="hl"></g>
+          <rect class="hit" x="${ml - 10}" y="${mt}" width="${pw + 20}" height="${ph + 6}" fill="transparent"/>
+        </svg>
+        <div class="lc-tip"></div>
+      </div>
+    </div>${leyenda}`;
+
+  const svg = cont.querySelector("svg"), tip = cont.querySelector(".lc-tip");
+  const cur = svg.querySelector(".cur"), hl = svg.querySelector(".hl"), hit = svg.querySelector(".hit");
+  const NS = "http://www.w3.org/2000/svg";
+  let idxActual = n - 1;
+  function mostrar(i){
+    idxActual = i;
+    const xi = X(i);
+    cur.setAttribute("x1", xi); cur.setAttribute("x2", xi); cur.style.display = "";
+    hl.replaceChildren();
+    tip.replaceChildren();
+    const t = document.createElement("div");
+    t.className = "t"; t.textContent = "Semana " + semanas[i];
+    tip.appendChild(t);
+    series.forEach(s => {
+      const v = s.valores[i];
+      if (v !== null){
+        const c = document.createElementNS(NS, "circle");
+        c.setAttribute("cx", xi); c.setAttribute("cy", Y(v)); c.setAttribute("r", 5);
+        c.setAttribute("fill", s.color); c.setAttribute("stroke", "#fff"); c.setAttribute("stroke-width", 2);
+        hl.appendChild(c);
+      }
+      const r = document.createElement("div"); r.className = "r";
+      const k = document.createElement("span"); k.className = "k"; k.style.background = s.color;
+      const val = document.createElement("span"); val.className = "v"; val.textContent = fmtN(v, cfg.dec) + (v === null ? "" : " " + cfg.unidad);
+      const nom = document.createElement("span"); nom.className = "n"; nom.textContent = s.nombre;
+      r.appendChild(k); r.appendChild(val); r.appendChild(nom);
+      tip.appendChild(r);
+    });
+    tip.style.display = "block";
+    const anchoTip = tip.offsetWidth;
+    tip.style.left = (xi + 14 + anchoTip > W ? Math.max(0, xi - anchoTip - 14) : xi + 14) + "px";
+  }
+  function ocultar(){
+    cur.style.display = "none"; hl.replaceChildren(); tip.style.display = "none";
+  }
+  function indiceDesde(ev){
+    const rect = svg.getBoundingClientRect();
+    const px = ev.clientX - rect.left;
+    if (n === 1) return 0;
+    return Math.max(0, Math.min(n - 1, Math.round((px - ml) / pw * (n - 1))));
+  }
+  hit.addEventListener("pointermove", ev => mostrar(indiceDesde(ev)));
+  hit.addEventListener("pointerdown", ev => mostrar(indiceDesde(ev)));
+  hit.addEventListener("pointerleave", ocultar);
+  svg.addEventListener("focus", () => mostrar(idxActual));
+  svg.addEventListener("blur", ocultar);
+  svg.addEventListener("keydown", ev => {
+    if (ev.key === "ArrowLeft"){ ev.preventDefault(); mostrar(Math.max(0, idxActual - 1)); }
+    if (ev.key === "ArrowRight"){ ev.preventDefault(); mostrar(Math.min(n - 1, idxActual + 1)); }
+  });
+}
+/* =========================================================
    ARRANQUE
 ========================================================= */
+precargarTodo();
 actualizarTabs();
 irARegistro();
 </script>
